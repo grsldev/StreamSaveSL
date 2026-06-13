@@ -161,28 +161,23 @@ type DownloadRequest struct {
 
 func (a *App) StartDownload(req DownloadRequest) {
 	cancelChan = make(chan struct{})
-
 	ytdlp := filepath.Join(a.baseDir, "bin", "yt-dlp.exe")
 	ffmpeg := filepath.Join(a.baseDir, "bin")
-
 	outputTpl := filepath.Join(req.OutputDir, "%(title)s.%(ext)s")
-
 	if _, err := os.Stat(ytdlp); err != nil {
-    		runtime.EventsEmit(a.ctx, "download:error", "yt-dlp not found in bin/")
-    		return
+		runtime.EventsEmit(a.ctx, "download:error", "yt-dlp not found in bin/")
+		return
 	}
-
 	ffmpegExe := filepath.Join(a.baseDir, "bin", "ffmpeg.exe")
 	if _, err := os.Stat(ffmpegExe); err != nil {
-    		runtime.EventsEmit(a.ctx, "download:error", "ffmpeg not found in bin/")
-    		return
+		runtime.EventsEmit(a.ctx, "download:error", "ffmpeg not found in bin/")
+		return
 	}
-
 	var args []string
-
 	if req.AudioOnly {
 		args = []string{
 			"--ffmpeg-location", ffmpeg,
+			"--newline",
 			"-x",
 			"--audio-format", strings.ToLower(req.Format),
 			"-o", outputTpl,
@@ -198,6 +193,7 @@ func (a *App) StartDownload(req DownloadRequest) {
 		}
 		args = []string{
 			"--ffmpeg-location", ffmpeg,
+			"--newline",
 			"-f", qualityArg,
 			"--merge-output-format", strings.ToLower(req.Format),
 			"-o", outputTpl,
@@ -207,87 +203,82 @@ func (a *App) StartDownload(req DownloadRequest) {
 			args = append(args, "--embed-thumbnail", "--add-metadata")
 		}
 	}
-
-        if req.NoPlaylist {
-            args = append(args, "--no-playlist")
-        }
-
+	if req.NoPlaylist {
+		args = append(args, "--no-playlist")
+	}
 	args = append(args, req.URL)
-
 	cmd := exec.Command(ytdlp, args...)
 	cmd.SysProcAttr = getSysProcAttr()
-
 	stdout, err := cmd.StdoutPipe()
 	cmd.Stderr = cmd.Stdout
 	if err != nil {
 		runtime.EventsEmit(a.ctx, "download:error", err.Error())
 		return
 	}
-
 	if err := cmd.Start(); err != nil {
 		runtime.EventsEmit(a.ctx, "download:error", err.Error())
 		return
 	}
-
 	runtime.EventsEmit(a.ctx, "download:started")
-
 	progRe := regexp.MustCompile(`\[download\]\s+(\d{1,3}\.?\d*)%`)
 	titleRe := regexp.MustCompile(`\[Merger\] Merging formats into "(.+)"$|^\[download\] Destination: .+[\\/](.+)\.[^.]+$`)
 	title := ""
-        lastFile := ""
-
+	lastFile := ""
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		select {
-    		case <-cancelChan:
-        		killCmd := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", cmd.Process.Pid))
-    			killCmd.SysProcAttr = getSysProcAttr()
-    			killCmd.Run()
-        		runtime.EventsEmit(a.ctx, "download:cancelled")
-        		return
-    		default:
-    		}
-    		line := scanner.Text()
-    		if m := titleRe.FindStringSubmatch(line); m != nil {
-    			if m[1] != "" {
-        			title = strings.TrimSuffix(filepath.Base(m[1]), filepath.Ext(m[1]))
-        			lastFile = m[1]
-    			} else {
-        			title = m[2]
-        			lastFile = filepath.Join(req.OutputDir, m[2]+"."+strings.ToLower(req.Format))
-    			}
+		case <-cancelChan:
+			killCmd := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", cmd.Process.Pid))
+			killCmd.SysProcAttr = getSysProcAttr()
+			killCmd.Run()
+			runtime.EventsEmit(a.ctx, "download:cancelled")
+			return
+		default:
 		}
-    		if m := progRe.FindStringSubmatch(line); m != nil {
-        		pct, _ := strconv.ParseFloat(m[1], 64)
-        		runtime.EventsEmit(a.ctx, "download:progress", pct)
-    		}
+		line := scanner.Text()
+		if m := titleRe.FindStringSubmatch(line); m != nil {
+			if m[1] != "" {
+				title = strings.TrimSuffix(filepath.Base(m[1]), filepath.Ext(m[1]))
+				lastFile = m[1]
+			} else {
+				title = m[2]
+				lastFile = filepath.Join(req.OutputDir, m[2]+"."+strings.ToLower(req.Format))
+			}
+		}
+		if strings.Contains(line, "[download] Downloading video") {
+			runtime.EventsEmit(a.ctx, "download:status", "video")
+		} else if strings.Contains(line, "[download] Downloading audio") {
+			runtime.EventsEmit(a.ctx, "download:status", "audio")
+		} else if strings.Contains(line, "[Merger]") {
+			runtime.EventsEmit(a.ctx, "download:status", "merging")
+		} else if strings.Contains(line, "[ExtractAudio]") {
+    			runtime.EventsEmit(a.ctx, "download:status", "converting")
+		}
+		if m := progRe.FindStringSubmatch(line); m != nil {
+			pct, _ := strconv.ParseFloat(m[1], 64)
+			runtime.EventsEmit(a.ctx, "download:progress", pct)
+		}
 	}
-
 	err = cmd.Wait()
-
 	select {
 	case <-cancelChan:
 		runtime.EventsEmit(a.ctx, "download:cancelled")
 		return
 	default:
 	}
-
 	if err != nil {
 		runtime.EventsEmit(a.ctx, "download:error", err.Error())
 		return
 	}
-
 	duration := a.getMediaDuration(lastFile)
-
 	a.saveHistory(HistoryEntry{
 		Title:     title,
 		URL:       req.URL,
 		Format:    req.Format,
 		Date:      time.Now().Format("2006-01-02 15:04"),
 		AudioOnly: req.AudioOnly,
-                Duration:  duration,
+		Duration:  duration,
 	})
-
 	runtime.EventsEmit(a.ctx, "download:done", map[string]string{"dir": req.OutputDir, "title": title})
 }
 
