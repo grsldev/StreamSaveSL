@@ -16,6 +16,7 @@ let config = {
 let downloading = false;
 let currentPage = 'home';
 let currentURL = '';
+let currentStatus = '';
 
 // === i18n ===
 const i18n = {
@@ -34,6 +35,10 @@ const i18n = {
     preparing: 'Preparing...',
     downloading: 'Downloading...',
     cancelling: 'Cancelling...',
+    status_video: 'Downloading video...',
+    status_audio: 'Downloading audio...',
+    status_merging: 'Merging...',
+    status_converting: 'Converting...',
     done: 'Download complete!',
     cancelled: 'Download cancelled.',
     error: 'Download error.',
@@ -70,6 +75,10 @@ const i18n = {
     preparing: 'Preparando...',
     downloading: 'Baixando...',
     cancelling: 'Cancelando...',
+    status_video: 'Baixando vídeo...',
+    status_audio: 'Baixando áudio...',
+    status_merging: 'Mesclando...',
+    status_converting: 'Convertendo...',
     done: 'Download concluído!',
     cancelled: 'Download cancelado.',
     error: 'Erro no download.',
@@ -97,6 +106,7 @@ function t(key) {
   return i18n[config.language]?.[key] || i18n['en'][key] || key;
 }
 
+// === DMC Easter Egg ===
 function getDMCMessage(url, title) {
   const text = (url + ' ' + title).toLowerCase();
 
@@ -129,17 +139,40 @@ function getDMCMessage(url, title) {
 // === Events from Go ===
 window.runtime.EventsOn('download:started', () => {
   if (!downloading) return;
+  currentStatus = 'preparing';
   setStatus(t('preparing'), false);
+});
+
+window.runtime.EventsOn('download:status', (status) => {
+  if (status === 'video') {
+    currentStatus = 'video';
+    setStatus(t('status_video'), false);
+    setProgress(0);
+  } else if (status === 'audio') {
+    currentStatus = 'audio';
+    setStatus(t('status_audio'), false);
+    setProgress(0);
+  } else if (status === 'merging') {
+    currentStatus = 'merging';
+    setStatus(t('status_merging'), false);
+  } else if (status === 'converting') {
+    currentStatus = 'converting';
+    setStatus(t('status_converting'), false);
+  }
 });
 
 window.runtime.EventsOn('download:progress', (pct) => {
   if (!downloading) return;
   setProgress(pct);
-  setStatus(t('downloading'), false);
+  if (currentStatus === 'preparing') {
+    currentStatus = 'downloading';
+    setStatus(t('downloading'), false);
+  }
 });
 
 window.runtime.EventsOn('download:done', (data) => {
   setProgress(100);
+  currentStatus = '';
   const title = (data.title || '').toLowerCase();
   const url = currentURL.toLowerCase();
   const dmcMsg = getDMCMessage(url, title);
@@ -158,6 +191,7 @@ window.runtime.EventsOn('download:done', (data) => {
 
 window.runtime.EventsOn('download:cancelled', () => {
   setProgress(0);
+  currentStatus = '';
   setStatus(t('cancelled'), false);
   downloading = false;
   updateDownloadBtn();
@@ -166,6 +200,7 @@ window.runtime.EventsOn('download:cancelled', () => {
 
 window.runtime.EventsOn('download:error', (msg) => {
   setProgress(0);
+  currentStatus = '';
   if (msg.includes('yt-dlp not found') || msg.includes('ffmpeg not found')) {
     window._missingBin = msg.includes('yt-dlp not found') ? '⚠️ ' + t('error_ytdlp') : '⚠️ ' + t('error_ffmpeg');
     render();
@@ -301,8 +336,8 @@ function renderHistory() {
           <div class="history-item">
             <div class="history-title">${e.title || e.url}</div>
             <div class="history-meta">
-    		${e.format.toUpperCase()} · ${e.audio_only ? '🎵' : '🎬'} · ${e.date}${e.duration ? ' · ' + e.duration : ''}
-  	    </div>
+              ${e.format.toUpperCase()} · ${e.audio_only ? '🎵' : '🎬'} · ${e.date}${e.duration ? ' · ' + e.duration : ''}
+            </div>
             <div class="history-actions">
               <span class="history-url">${e.url}</span>
               <button class="btn-sm" onclick="redownload(${i})">${t('download_again')}</button>
@@ -412,10 +447,10 @@ window.handleDownload = async function() {
   }
 
   const url = document.getElementById('url-input')?.value?.trim();
-  if (!url) { 
-    setStatus(t('urlRequired'), true); 
+  if (!url) {
+    setStatus(t('urlRequired'), true);
     setTimeout(() => setStatus('', false), 4000);
-    return; 
+    return;
   }
 
   const videoFormat = document.getElementById('video-format')?.value || config.video_format;
@@ -428,6 +463,7 @@ window.handleDownload = async function() {
   SaveConfig(config);
 
   downloading = true;
+  currentStatus = '';
   updateDownloadBtn();
   setProgress(0);
 
@@ -580,7 +616,7 @@ style.textContent = `
 
   .history-header { display: flex; justify-content: flex-end; }
   .history-item { padding: 8px 12px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); transition: border 0.2s; }
-  .history-item:hover { border-color: rgba(230,57,70,0.2); }
+  .history-item:hover { border-color: rgba(255,255,255,0.12); }
   .light .history-item { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.07); }
   .history-title { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .history-meta { font-size: 11px; opacity: 0.4; margin-top: 2px; }
@@ -620,7 +656,7 @@ document.head.appendChild(style);
 async function init() {
   config = await LoadConfig();
   window._qualities = ['best', '1080', '720', '480', '360'];
-  
+
   document.getElementById('app').innerHTML = `
     <div class="app ${config.dark_theme ? 'dark' : 'light'}" id="app-root">
       <header class="header">
@@ -632,7 +668,7 @@ async function init() {
       <div id="content"></div>
     </div>
   `;
-  
+
   render();
 }
 
