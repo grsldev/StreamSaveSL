@@ -8,7 +8,7 @@
   "frontend:dev:serverUrl": "auto",
   "info": {
     "productName": "Stream Save SL",
-    "productVersion": "1.0.1",
+    "productVersion": "1.0.2",
     "companyName": "grsldev",
     "copyright": "Copyright © 2026 grsldev. MIT License",
     "comments": "A GUI for yt-dlp — portable video and audio downloader for Windows"
