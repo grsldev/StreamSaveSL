@@ -187,9 +187,9 @@ func (a *App) StartDownload(req DownloadRequest) {
 			args = append(args, "--embed-thumbnail", "--add-metadata")
 		}
 	} else {
-		qualityArg := "bestvideo+bestaudio"
+		qualityArg := "bestvideo+bestaudio/best"
 		if req.Quality != "best" {
-			qualityArg = fmt.Sprintf("bestvideo[height<=%s]+bestaudio", req.Quality)
+			qualityArg = fmt.Sprintf("bestvideo[height<=%s]+bestaudio/best", req.Quality)
 		}
 		args = []string{
 			"--ffmpeg-location", ffmpeg,
